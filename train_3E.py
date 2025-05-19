@@ -16,11 +16,11 @@ import os.path as osp
 def get_args():
     parser = argparse.ArgumentParser(description='HDRFlow',
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--dataset_vimeo_dir", type=str, default='/data1/cuijiahao/HDRVIDEO/data/vimeo_septuplet',
+    parser.add_argument("--dataset_vimeo_dir", type=str, default='./data/vimeo_septuplet',
                         help='dataset directory'),
-    parser.add_argument("--dataset_test_dir", type=str, default='/data1/cuijiahao/HDRVIDEO/data/Synthetic_Dataset/HDR_Synthetic_Test_Dataset-001',
+    parser.add_argument("--dataset_test_dir", type=str, default='./data/HDR_Synthetic_Test_Dataset-001',
                         help='dataset directory'),
-    parser.add_argument('--logdir', type=str, default='./checkpoints_3E_ours_final_small',
+    parser.add_argument('--logdir', type=str, default='./checkpoints_3E',
                         help='target log directory')
     parser.add_argument('--num_workers', type=int, default=8, metavar='N',
                         help='number of workers to fetch data (default: 8)')
