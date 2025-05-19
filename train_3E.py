@@ -6,19 +6,21 @@ from tqdm import tqdm
 import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
-from dataset import fetch_dataloader
-from models.loss import HDRFlow_Loss_3E
-from models.model_3E import HDRFlow
+from dataset import fetch_dataloader_3E
+from models.IFRNet_3E import MSANet_3E
 from utils.utils import *
+from skimage.metrics import structural_similarity as ssim
+from skimage.metrics import peak_signal_noise_ratio as psnr
+import os.path as osp
 
 def get_args():
     parser = argparse.ArgumentParser(description='HDRFlow',
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--dataset_vimeo_dir", type=str, default='data/vimeo_septuplet',
+    parser.add_argument("--dataset_vimeo_dir", type=str, default='/data1/cuijiahao/HDRVIDEO/data/vimeo_septuplet',
                         help='dataset directory'),
-    parser.add_argument("--dataset_sintel_dir", type=str, default='data/Sintel/training/',
+    parser.add_argument("--dataset_test_dir", type=str, default='/data1/cuijiahao/HDRVIDEO/data/Synthetic_Dataset/HDR_Synthetic_Test_Dataset-001',
                         help='dataset directory'),
-    parser.add_argument('--logdir', type=str, default='./checkpoints_3E',
+    parser.add_argument('--logdir', type=str, default='./checkpoints_3E_ours_final_small',
                         help='target log directory')
     parser.add_argument('--num_workers', type=int, default=8, metavar='N',
                         help='number of workers to fetch data (default: 8)')
@@ -32,21 +34,27 @@ def get_args():
     parser.add_argument('--lr', type=float, default=0.0001, metavar='LR',
                         help='learning rate (default: 0.0002)')
     parser.add_argument('--lr_decay_epochs', type=str, 
-                        default="20,30:2", help='the epochs to decay lr: the downscale rate')
+                        default="100,100:2", help='the epochs to decay lr: the downscale rate')
     parser.add_argument('--start_epoch', type=int, default=1, metavar='N',
                         help='start epoch of training (default: 1)')
-    parser.add_argument('--epochs', type=int, default=40, metavar='N',
+    parser.add_argument('--epochs', type=int, default=100, metavar='N',
                         help='number of epochs to train (default: 100)')
     parser.add_argument('--batch_size', type=int, default=16, metavar='N',
                         help='training batch size (default: 16)')
-    parser.add_argument('--val_batch_size', type=int, default=8, metavar='N',
+    parser.add_argument('--val_batch_size', type=int, default=1, metavar='N',
                         help='testing batch size (default: 1)')
     parser.add_argument('--log_interval', type=int, default=100, metavar='N',
                         help='how many batches to wait before logging training status')
+    parser.add_argument('--save_results', action='store_true', default=False)
+    parser.add_argument('--save_dir', type=str, default="./output_results/3E_train")
+    parser.add_argument('--nframes', type=int, default=5)
+    parser.add_argument('--nexps', type=int, default=3)
+    parser.add_argument('--tone_low', default=False, action='store_true')
+    parser.add_argument('--tone_ref', default=True, action='store_true')
     return parser.parse_args()
 
 
-def train(args, model, device, train_loader, optimizer, epoch, hdrflow_loss):
+def train(args, model, device, train_loader, optimizer, epoch):
     model.train()
     batch_time = AverageMeter()
     data_time = AverageMeter()
@@ -56,11 +64,16 @@ def train(args, model, device, train_loader, optimizer, epoch, hdrflow_loss):
         ldrs = [x.to(device) for x in batch_data['ldrs']]
         expos = [x.to(device) for x in batch_data['expos']]
         hdrs = [x.to(device) for x in batch_data['hdrs']]
-        flow_gts = [x.to(device) for x in batch_data['flow_gts']]
-        flow_mask = batch_data['flow_mask'].to(device)
-        pred_hdr, flow_preds = model(ldrs, expos)
-        cur_ldr = ldrs[2]
-        loss = hdrflow_loss(pred, hdrs, flow_preds, cur_ldr, flow_mask, flow_gts)
+        rev1_ldrs = [x.to(device) for x in batch_data['rev1_ldrs']]
+        rev2_ldrs = [x.to(device) for x in batch_data['rev2_ldrs']]
+        rev1_expos = [x.to(device) for x in batch_data['rev1_expos']]
+        rev2_expos = [x.to(device) for x in batch_data['rev2_expos']]
+        prob = np.random.uniform()
+        perturb_low_expo_imgs(args, ldrs, expos, prob)
+        perturb_low_expo_imgs(args, rev1_ldrs, rev1_expos, prob)
+        perturb_low_expo_imgs(args, rev2_ldrs, rev2_expos, prob)
+        pred_hdr, loss_rec, loss_geo, loss_msa  = model(ldrs, hdrs, rev1_ldrs, rev2_ldrs, expos)
+        loss = loss_rec + 0.01 * loss_geo + 0.01 * loss_msa
         optimizer.zero_grad()
         loss.backward()
         optimizer.step()
@@ -84,20 +97,53 @@ def validation(args, model, device, val_loader, optimizer, epoch):
     n_val = len(val_loader)
     val_psnr = AverageMeter()
     val_mu_psnr = AverageMeter()
+    val_ssim = AverageMeter()
+    val_mu_ssim = AverageMeter()
     with torch.no_grad():
         for batch_idx, batch_data in enumerate(val_loader):
             ldrs = [x.to(device) for x in batch_data['ldrs']]
             expos = [x.to(device) for x in batch_data['expos']]
-            hdrs = [x.to(device) for x in batch_data['hdrs']]
-            gt_hdr = hdrs[2]
-            pred_hdr, _ = model(ldrs, expos)
-            psnr = batch_psnr(pred_hdr, gt_hdr, 1.0)
-            mu_psnr = batch_psnr_mu(pred_hdr, gt_hdr, 1.0)
-            val_psnr.update(psnr.item())
-            val_mu_psnr.update(mu_psnr.item())
+            gt_hdr = batch_data['hdr']
+            #gt_hdr = hdrs[1]
+            padder = InputPadder(ldrs[0].shape, divis_by=16)
+            pad_ldrs = padder.pad(ldrs)
+            pred_hdr = model(pad_ldrs, 0, 0, 0, expos, test_mode=True)
+            pred_hdr = padder.unpad(pred_hdr)
+            cur_ldr = ldrs[2]
+            pred_hdr = torch.squeeze(pred_hdr.detach().cpu()).numpy().astype(np.float32).transpose(1,2,0)
+            cur_ldr = torch.squeeze(ldrs[2].cpu()).numpy().astype(np.float32).transpose(1,2,0)
+            gt_hdr = torch.squeeze(gt_hdr.cpu()).numpy().astype(np.float32).transpose(1,2,0)
+            Y = 0.299 * cur_ldr[:, :, 0] + 0.587 * cur_ldr[:, :, 1] + 0.114 * cur_ldr[:, :, 2]
+            Y = Y[:, :, None]
+            if expos[2] == 1.:
+                mask = Y < 0.2
+            elif expos[2] == 4.:
+                mask = (Y < 0.2) | (Y > 0.8)
+            else:
+                mask = Y > 0.8
+            cur_linear_ldr = ldr_to_hdr(ldrs[2], expos[2])
+            cur_linear_ldr = torch.squeeze(cur_linear_ldr.cpu()).numpy().astype(np.float32).transpose(1,2,0)
+            pred_hdr = (~mask) * cur_linear_ldr + (mask) * pred_hdr
+            pred_hdr_tm = tonemap(pred_hdr)
+            gt_hdr_tm = tonemap(gt_hdr)      
+
+            psnrL = psnr(pred_hdr, gt_hdr)
+            ssimL = ssim(gt_hdr, pred_hdr, multichannel=True, channel_axis=2, data_range=gt_hdr.max()-gt_hdr.min())
+            psnrT = psnr(pred_hdr_tm, gt_hdr_tm)
+            ssimT = ssim(gt_hdr_tm, pred_hdr_tm, multichannel=True, channel_axis=2, data_range=gt_hdr_tm.max()-gt_hdr_tm.min())
+
+            val_psnr.update(psnrL.item())
+            val_mu_psnr.update(psnrT.item())
+            val_ssim.update(ssimL.item())
+            val_mu_ssim.update(ssimT.item())
+            if args.save_results:
+                hdr_output_dir = os.path.join(args.save_dir, 'hdr_output')
+                if not osp.exists(hdr_output_dir):
+                    os.makedirs(hdr_output_dir)
+                cv2.imwrite(os.path.join(hdr_output_dir, '{:0>3d}_pred.png'.format(batch_idx+1)), (pred_hdr_tm*255.)[:,:,[2,1,0]].astype('uint8'))
 
     print('Validation set: Number: {}'.format(n_val))
-    print('Validation set: Average PSNR-l: {:.4f}, PSNR-mu: {:.4f}'.format(val_psnr.avg, val_mu_psnr.avg))
+    print('Validation set: Average PSNR-l: {:.4f}, PSNR-mu: {:.4f}, SSIM-l: {:.4f}, SSIM-mu: {:.4f}\n'.format(val_psnr.avg, val_mu_psnr.avg, val_ssim.avg, val_mu_ssim.avg))
 
     save_dict = {
         'epoch': epoch + 1,
@@ -107,7 +153,7 @@ def validation(args, model, device, val_loader, optimizer, epoch):
 
     with open(os.path.join(args.logdir, 'checkpoint.json'), 'a') as f:
         f.write('epoch:' + str(epoch) + '\n')
-        f.write('Validation set: Average PSNR-l: {:.4f}, PSNR-mu: {:.4f}\n'.format(val_psnr.avg, val_mu_psnr.avg))
+        f.write('Validation set: Average PSNR-l: {:.4f}, PSNR-mu: {:.4f}, SSIM-l: {:.4f}, SSIM-mu: {:.4f}\n'.format(val_psnr.avg, val_mu_psnr.avg, val_ssim.avg, val_mu_ssim.avg))
 
 def main():
     args = get_args()
@@ -117,10 +163,9 @@ def main():
         os.makedirs(args.logdir)
     device = torch.device('cuda')
     # model
-    model = HDRFlow()
+    model = MSANet_3E()
     if args.init_weights:
         init_parameters(model)
-    hdrflow_loss = HDRFlow_Loss_3E().to(device)
     # optimizer
     optimizer = torch.optim.Adam(model.parameters(), lr=args.lr, betas=(0.9, 0.999), eps=1e-08)
     model.to(device)
@@ -137,12 +182,13 @@ def main():
         else:
             print("===> No checkpoint is founded at {}.".format(args.resume))
     
-    train_loader, val_loader = fetch_dataloader(args)
+    train_loader, val_loader = fetch_dataloader_3E(args)
 
-    for epoch in range(args.epochs):
+    for epoch in range(args.start_epoch, args.epochs):
         adjust_learning_rate(args, optimizer, epoch)
-        train(args, model, device, train_loader, optimizer, epoch, hdrflow_loss)
+        train(args, model, device, train_loader, optimizer, epoch)
         validation(args, model, device, val_loader, optimizer, epoch)
 
 if __name__ == '__main__':
     main()
+
