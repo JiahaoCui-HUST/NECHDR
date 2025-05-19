@@ -27,7 +27,7 @@ pip install -r requirements.txt
 #### 1. Set up training datasets
 The Vimeo-90K dataset is used as training dataset, which can be downloaded at [DeepHDRVideo-Dataset](https://github.com/guanyingc/DeepHDRVideo-Dataset).. The training dataset can be organized as follows:
 ```
-├── NECHDR_huawei/data
+├── NECHDR/data
             ├── vimeo_septuplet
                 ├── sequences
 ```
@@ -36,7 +36,7 @@ The Vimeo-90K dataset is used as training dataset, which can be downloaded at [D
 Following [HDRFlow](https://github.com/OpenImagingLab/HDRFlow), We evaluate our method on HDR_Synthetic_Test_Dataset (Cinematic Video dataset), DeepHDRVideo, and TOG13_Dynamic_Dataset (HDRVideo dataset). These datasets can be downloaded at [DeepHDRVideo-Dataset](https://github.com/guanyingc/DeepHDRVideo-Dataset). The HDR_Synthetic_Test_Dataset contains two synthetic videos (POKER FULLSHOT and CAROUSEL FIREWORKS), DeepHDRVideo consists of both real-world dynamic scenes and static scenes that have been augmented with random global motion. The TOG13_Dynamic_Dataset does not have ground truth, so we use it for qualitative evaluation. The test datasets are organized as follows:
 
 ```
-├── NECHDR_huawei/data
+├── NECHDR/data
             ├── HDR_Synthetic_Test_Dataset
             ├── dynamic_RGB_data_2exp_release
             ├── static_RGB_data_2exp_rand_motion_release
