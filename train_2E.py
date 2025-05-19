@@ -8,9 +8,7 @@ import torch
 import torch.nn as nn
 from torch.utils.data import DataLoader
 from dataset import fetch_dataloader_2E
-from models.loss import HDRFlow_Loss_2E
-from models.model_2E import HDRFlow
-from models.IFRNet_s_comparable import MSANet
+from models.IFRNet import MSANet
 from utils.utils import *
 from skimage.metrics import structural_similarity as ssim
 from skimage.metrics import peak_signal_noise_ratio as psnr
