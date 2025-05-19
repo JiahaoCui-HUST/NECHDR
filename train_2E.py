@@ -17,7 +17,7 @@ import os.path as osp
 def get_args():
     parser = argparse.ArgumentParser(description='HDRFlow',
                                      formatter_class=argparse.ArgumentDefaultsHelpFormatter)
-    parser.add_argument("--dataset_vimeo_dir", type=str, default='./data//vimeo_septuplet',
+    parser.add_argument("--dataset_vimeo_dir", type=str, default='./data/vimeo_septuplet',
                         help='dataset directory'),
     parser.add_argument("--dataset_test_dir", type=str, default='./data/HDR_Synthetic_Test_Dataset-001',
                         help='dataset directory'),
