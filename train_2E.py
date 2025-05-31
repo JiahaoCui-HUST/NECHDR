@@ -39,7 +39,7 @@ def get_args():
                         help='start epoch of training (default: 1)')
     parser.add_argument('--epochs', type=int, default=100, metavar='N',
                         help='number of epochs to train (default: 100)')
-    parser.add_argument('--batch_size', type=int, default=32, metavar='N',
+    parser.add_argument('--batch_size', type=int, default=16, metavar='N',
                         help='training batch size (default: 16)')
     parser.add_argument('--val_batch_size', type=int, default=1, metavar='N',
                         help='testing batch size (default: 1)')
