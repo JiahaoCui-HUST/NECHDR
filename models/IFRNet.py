@@ -256,7 +256,7 @@ class MSANet(nn.Module):
         self.merge_hdr = MergeHDRModule()
 
 
-    def forward(self, ldrs, hdrs, rev_ldrs, expos, test_mode = True):
+    def forward(self, ldrs, hdrs, rev_ldrs, expos, test_mode = False):
 
         pt_img_c = cur_tone_perturb(ldrs[1], test_mode)
         # pt_img_c = ldrs[1]
